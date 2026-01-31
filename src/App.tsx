@@ -24,6 +24,7 @@ export default function App() {
     // Trạng thái kỳ thi dành cho học sinh
     const [examSettings, setExamSettings] = useState<any>(null);
     const [timeLeft, setTimeLeft] = useState(0);
+    const [userAnswers, setUserAnswers] = useState<Record<number, string>>({});
 
     // Xử lý đếm ngược thời gian thi
     React.useEffect(() => {
@@ -107,11 +108,19 @@ export default function App() {
                 setExamData(data.questions);
                 setCurrentExamTitle(data.title);
                 setExamSettings(data);
+                setUserAnswers({}); // Reset answers
                 setView('student-form');
             } else {
                 alert("Mã phòng không tồn tại hoặc đã bị xóa!");
             }
         });
+    };
+
+    const handleAnswerChange = (questionIndex: number, value: string) => {
+        setUserAnswers(prev => ({
+            ...prev,
+            [questionIndex]: value
+        }));
     };
 
     return (
@@ -402,18 +411,32 @@ export default function App() {
                                             <input
                                                 type="text"
                                                 placeholder="Nhập câu trả lời của bạn..."
+                                                value={userAnswers[i] || ""}
+                                                onChange={(e) => handleAnswerChange(i, e.target.value)}
                                                 className="w-full bg-white/5 border border-white/10 p-5 rounded-2xl focus:border-indigo-500 outline-none transition-all"
                                             />
                                         ) : (
-                                            q.options.map((opt, idx) => (
-                                                <button
-                                                    key={idx}
-                                                    className="text-left p-5 bg-white/5 rounded-2xl border border-white/5 hover:bg-white/10 hover:border-indigo-500/50 transition-all font-medium group flex justify-between items-center"
-                                                >
-                                                    <span>{opt}</span>
-                                                    <div className={`w-5 h-5 rounded-full border-2 border-white/10 group-hover:border-${q.type === 'TF' ? 'pink' : 'indigo'}-500 transition-colors`}></div>
-                                                </button>
-                                            ))
+                                            q.options.map((opt, idx) => {
+                                                const isSelected = userAnswers[i] === opt;
+                                                return (
+                                                    <button
+                                                        key={idx}
+                                                        onClick={() => handleAnswerChange(i, opt)}
+                                                        className={`text-left p-5 rounded-2xl border transition-all font-medium group flex justify-between items-center ${isSelected
+                                                                ? 'bg-indigo-600/20 border-indigo-500 shadow-[0_0_20px_rgba(99,102,241,0.2)]'
+                                                                : 'bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/20'
+                                                            }`}
+                                                    >
+                                                        <span>{opt}</span>
+                                                        <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${isSelected
+                                                                ? 'border-indigo-400 bg-indigo-500'
+                                                                : 'border-white/10 group-hover:border-white/30'
+                                                            }`}>
+                                                            {isSelected && <div className="w-2 h-2 bg-white rounded-full"></div>}
+                                                        </div>
+                                                    </button>
+                                                );
+                                            })
                                         )}
                                     </div>
                                 </div>
