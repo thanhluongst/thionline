@@ -7,12 +7,45 @@ import { parseExamWord, Question } from './utils/WordParser';
 import confetti from 'canvas-confetti';
 
 export default function App() {
-    const [view, setView] = useState<'home' | 'teacher' | 'student' | 'exam'>('home');
+    const [view, setView] = useState<'home' | 'teacher' | 'student' | 'student-form' | 'exam'>('home');
     const [user, setUser] = useState<any>(null);
     const [examData, setExamData] = useState<Question[]>([]);
     const [roomCode, setRoomCode] = useState('');
     const [loading, setLoading] = useState(false);
     const [currentExamTitle, setCurrentExamTitle] = useState('');
+    const [studentName, setStudentName] = useState('');
+    const [studentClass, setStudentClass] = useState('');
+
+    // Trạng thái cấu hình đề thi của giáo viên
+    const [timeLimit, setTimeLimit] = useState(45); // Mặc định 45 phút
+    const [targetClass, setTargetClass] = useState('');
+    const [isFreeMode, setIsFreeMode] = useState(true);
+
+    // Trạng thái kỳ thi dành cho học sinh
+    const [examSettings, setExamSettings] = useState<any>(null);
+    const [timeLeft, setTimeLeft] = useState(0);
+
+    // Xử lý đếm ngược thời gian thi
+    React.useEffect(() => {
+        let timer: any;
+        if (view === 'exam' && timeLeft > 0) {
+            timer = setInterval(() => {
+                setTimeLeft((prev) => prev - 1);
+            }, 1000);
+        } else if (timeLeft === 0 && view === 'exam') {
+            alert("Hết thời gian làm bài!");
+            confetti();
+            setView('home');
+        }
+        return () => clearInterval(timer);
+    }, [view, timeLeft]);
+
+    // Hàm định dạng phút:giây
+    const formatTime = (seconds: number) => {
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return `${m}:${s < 10 ? '0' : ''}${s}`;
+    };
 
     const login = async () => {
         try {
@@ -45,6 +78,9 @@ export default function App() {
                 questions: parsed,
                 teacherId: user.uid,
                 teacherName: user.displayName,
+                timeLimit: Number(timeLimit),
+                targetClass: isFreeMode ? "" : targetClass,
+                isFreeMode: isFreeMode,
                 createdAt: serverTimestamp()
             });
 
@@ -70,7 +106,8 @@ export default function App() {
                 const data = snapshot.docs[0].data();
                 setExamData(data.questions);
                 setCurrentExamTitle(data.title);
-                setView('exam');
+                setExamSettings(data);
+                setView('student-form');
             } else {
                 alert("Mã phòng không tồn tại hoặc đã bị xóa!");
             }
@@ -183,13 +220,48 @@ export default function App() {
                                 <>
                                     <div className="space-y-2">
                                         <h2 className="text-3xl font-black">Quản lý Đề thi</h2>
-                                        <p className="text-slate-400">Chọn file Word (.docx) đã được gạch chân đáp án đúng.</p>
+                                        <p className="text-slate-400">Thiết lập thông tin trước khi tải file Word.</p>
                                     </div>
 
-                                    <div className="flex flex-col items-center gap-6">
+                                    <div className="grid md:grid-cols-3 gap-4 w-full max-w-2xl mx-auto">
+                                        <div className="text-left space-y-1">
+                                            <label className="text-xs font-bold text-slate-500 uppercase ml-2">Thời gian (phút)</label>
+                                            <input
+                                                type="number"
+                                                value={timeLimit}
+                                                onChange={(e) => setTimeLimit(Number(e.target.value))}
+                                                className="input-glass w-full"
+                                            />
+                                        </div>
+                                        <div className="text-left space-y-1">
+                                            <label className="text-xs font-bold text-slate-500 uppercase ml-2">Chế độ thi</label>
+                                            <select
+                                                value={isFreeMode ? 'free' : 'locked'}
+                                                onChange={(e) => setIsFreeMode(e.target.value === 'free')}
+                                                className="input-glass w-full"
+                                            >
+                                                <option value="free">Thi tự do</option>
+                                                <option value="locked">Theo lớp</option>
+                                            </select>
+                                        </div>
+                                        {!isFreeMode && (
+                                            <div className="text-left space-y-1 animate-in slide-in-from-top-2">
+                                                <label className="text-xs font-bold text-slate-500 uppercase ml-2">Lớp chỉ định</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="Ví dụ: 12A1"
+                                                    value={targetClass}
+                                                    onChange={(e) => setTargetClass(e.target.value)}
+                                                    className="input-glass w-full"
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="flex flex-col items-center gap-6 pt-4">
                                         <label className={`btn-primary w-full max-w-sm cursor-pointer ${loading ? 'opacity-50 pointer-events-none' : ''}`}>
                                             <Upload size={20} />
-                                            {loading ? 'Đang xử lý...' : 'Tải đề thi từ máy tính'}
+                                            {loading ? 'Đang xử lý...' : 'Tải đề & Tạo phòng thi'}
                                             <input type="file" className="hidden" accept=".docx" onChange={handleUpload} />
                                         </label>
 
@@ -242,17 +314,72 @@ export default function App() {
                     </div>
                 )}
 
-                {/* VIEW: EXAM */}
+                {/* VIEW: STUDENT FORM (Information Collection) */}
+                {view === 'student-form' && (
+                    <div className="max-w-md mx-auto animate-in slide-in-from-bottom-8 duration-500">
+                        <div className="glass-card p-10 rounded-[2.5rem] space-y-8 text-center shadow-indigo-500/10 shadow-2xl border-indigo-500/20">
+                            <div className="w-20 h-20 bg-indigo-500/10 rounded-3xl flex items-center justify-center mx-auto">
+                                <Users className="text-indigo-400" size={40} />
+                            </div>
+                            <div className="space-y-2">
+                                <h2 className="text-3xl font-black">Thông tin thí sinh</h2>
+                                <p className="text-slate-400">Vui lòng nhập đầy đủ để bắt đầu làm bài</p>
+                            </div>
+                            <div className="space-y-4">
+                                <input
+                                    type="text"
+                                    placeholder="Họ và tên học sinh"
+                                    className="w-full bg-white/5 border border-white/20 p-4 rounded-xl focus:border-indigo-500 outline-none transition-all"
+                                    value={studentName}
+                                    onChange={(e) => setStudentName(e.target.value)}
+                                />
+                                <input
+                                    type="text"
+                                    placeholder="Lớp (Ví dụ: 12A1)"
+                                    className="w-full bg-white/5 border border-white/20 p-4 rounded-xl focus:border-indigo-500 outline-none transition-all"
+                                    value={studentClass}
+                                    onChange={(e) => setStudentClass(e.target.value)}
+                                />
+                            </div>
+                            <button
+                                onClick={() => {
+                                    if (!studentName || !studentClass) return alert("Vui lòng nhập đầy đủ thông tin!");
+
+                                    // Kiểm tra nếu không phải thi tự do thì phải đúng lớp
+                                    if (!examSettings.isFreeMode && examSettings.targetClass && studentClass.toUpperCase() !== examSettings.targetClass.toUpperCase()) {
+                                        return alert(`Đề thi này chỉ dành cho lớp ${examSettings.targetClass}. Vui lòng kiểm tra lại lớp của bạn.`);
+                                    }
+
+                                    // Cài đặt thời gian đếm ngược
+                                    if (examSettings.timeLimit) {
+                                        setTimeLeft(examSettings.timeLimit * 60);
+                                    }
+
+                                    setView('exam');
+                                }}
+                                className="btn-primary w-full py-5 text-xl"
+                            >
+                                Vào Làm Bài
+                            </button>
+                        </div>
+                    </div>
+                )}
                 {view === 'exam' && (
                     <div className="space-y-8 max-w-3xl mx-auto animate-in fade-in duration-700">
                         <div className="flex justify-between items-center bg-white/5 p-6 rounded-2xl border border-white/10 sticky top-24 z-40 backdrop-blur-lg">
                             <div>
                                 <h2 className="font-bold text-indigo-400 uppercase text-xs tracking-widest mb-1">Đang làm bài</h2>
-                                <p className="font-bold truncate max-w-[200px] md:max-w-xs">{currentExamTitle}</p>
+                                <p className="font-bold truncate max-w-[150px] md:max-w-xs">{currentExamTitle}</p>
                             </div>
-                            <div className="text-right">
-                                <p className="text-2xl font-black text-white">{examData.length}</p>
-                                <p className="text-[10px] uppercase font-bold text-slate-500 tracking-tighter">Tổng câu hỏi</p>
+                            <div className="flex items-center gap-6">
+                                <div className="text-center px-4 py-1.5 bg-red-500/10 border border-red-500/20 rounded-xl">
+                                    <p className="text-xl font-black text-red-500 tabular-nums">{formatTime(timeLeft)}</p>
+                                    <p className="text-[8px] uppercase font-bold text-red-500/70 tracking-tighter">Thời gian còn lại</p>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-2xl font-black text-white">{examData.length}</p>
+                                    <p className="text-[10px] uppercase font-bold text-slate-500 tracking-tighter">Tổng câu hỏi</p>
+                                </div>
                             </div>
                         </div>
 
