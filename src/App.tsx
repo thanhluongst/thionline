@@ -2,12 +2,12 @@ import React, { useState } from 'react';
 import { LogIn, Upload, Users, GraduationCap, Play, ClipboardList, CheckCircle2, Home } from 'lucide-react';
 import { auth, googleProvider, db } from './firebase';
 import { signInWithPopup } from 'firebase/auth';
-import { collection, addDoc, onSnapshot, query, where, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, onSnapshot, query, where, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import { parseExamWord, Question } from './utils/WordParser';
 import confetti from 'canvas-confetti';
 
 export default function App() {
-    const [view, setView] = useState<'home' | 'teacher' | 'student' | 'student-form' | 'exam' | 'stats'>('home');
+    const [view, setView] = useState<'home' | 'teacher' | 'student' | 'student-form' | 'exam' | 'stats' | 'waiting'>('home');
     const [user, setUser] = useState<any>(null);
     const [examData, setExamData] = useState<Question[]>([]);
     const [roomCode, setRoomCode] = useState('');
@@ -15,11 +15,13 @@ export default function App() {
     const [currentExamTitle, setCurrentExamTitle] = useState('');
     const [studentName, setStudentName] = useState('');
     const [studentClass, setStudentClass] = useState('');
+    const [pendingStudentId, setPendingStudentId] = useState<string | null>(null);
 
     // Trạng thái cấu hình đề thi của giáo viên
-    const [timeLimit, setTimeLimit] = useState(45); // Mặc định 45 phút
+    const [timeLimit, setTimeLimit] = useState(45);
     const [targetClass, setTargetClass] = useState('');
     const [isFreeMode, setIsFreeMode] = useState(true);
+    const [requiresApproval, setRequiresApproval] = useState(false);
 
     // Trạng thái kỳ thi dành cho học sinh
     const [examSettings, setExamSettings] = useState<any>(null);
@@ -28,6 +30,7 @@ export default function App() {
     const [teacherRooms, setTeacherRooms] = useState<any[]>([]);
     const [selectedRoomStats, setSelectedRoomStats] = useState<any>(null);
     const [studentResults, setStudentResults] = useState<any[]>([]);
+    const [waitingStudents, setWaitingStudents] = useState<any[]>([]);
 
     // Xử lý đếm ngược thời gian thi
     React.useEffect(() => {
@@ -86,6 +89,7 @@ export default function App() {
                 timeLimit: Number(timeLimit),
                 targetClass: isFreeMode ? "" : targetClass,
                 isFreeMode: isFreeMode,
+                requiresApproval: requiresApproval,
                 createdAt: serverTimestamp()
             });
 
@@ -149,6 +153,7 @@ export default function App() {
         const correctCount = calculateScore();
         setLoading(true);
         try {
+            // Cập nhật kết quả thỉ
             await addDoc(collection(db, "results"), {
                 studentName,
                 studentClass,
@@ -158,6 +163,12 @@ export default function App() {
                 total: examData.length,
                 submittedAt: serverTimestamp()
             });
+
+            // Nếu học sinh này đang trong danh sách chờ/đang thi, ta đánh dấu kết thúc
+            if (pendingStudentId) {
+                await updateDoc(doc(db, "waiting_room", pendingStudentId), { status: 'finished' });
+            }
+
             confetti({
                 particleCount: 150,
                 spread: 70,
@@ -191,6 +202,28 @@ export default function App() {
             // Actually, let's just use a new view state 'stats'
         });
     };
+
+    const fetchWaitingStudents = (roomCode: string) => {
+        const q = query(collection(db, "waiting_room"), where("roomCode", "==", roomCode), where("status", "==", "pending"));
+        onSnapshot(q, (snapshot) => {
+            const students = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setWaitingStudents(students);
+        });
+    };
+
+    const handleApproval = async (studentId: string, status: 'approved' | 'rejected') => {
+        setLoading(true);
+        try {
+            await updateDoc(doc(db, "waiting_room", studentId), { status });
+            alert(`Học sinh đã được ${status === 'approved' ? 'duyệt' : 'từ chối'}.`);
+        } catch (error) {
+            console.error("Error updating student status:", error);
+            alert("Lỗi khi cập nhật trạng thái học sinh.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
 
     return (
         <div className="max-w-6xl mx-auto px-4">
@@ -312,6 +345,17 @@ export default function App() {
                                             />
                                         </div>
                                         <div className="text-left space-y-1">
+                                            <label className="text-xs font-bold text-slate-500 uppercase ml-2">Duyệt học sinh</label>
+                                            <select
+                                                value={requiresApproval ? 'yes' : 'no'}
+                                                onChange={(e) => setRequiresApproval(e.target.value === 'yes')}
+                                                className="input-glass w-full"
+                                            >
+                                                <option value="no">Vào tự động</option>
+                                                <option value="yes">Phải được duyệt</option>
+                                            </select>
+                                        </div>
+                                        <div className="text-left space-y-1">
                                             <label className="text-xs font-bold text-slate-500 uppercase ml-2">Chế độ thi</label>
                                             <select
                                                 value={isFreeMode ? 'free' : 'locked'}
@@ -377,6 +421,9 @@ export default function App() {
                                                                     setStudentResults(snapshot.docs.map(doc => doc.data()));
                                                                     setView('stats');
                                                                 });
+                                                                if (room.requiresApproval) {
+                                                                    fetchWaitingStudents(room.code);
+                                                                }
                                                             }}
                                                             className="bg-white/10 hover:bg-white text-white hover:text-indigo-900 px-4 py-2 rounded-xl text-sm font-bold transition-all"
                                                         >
@@ -452,7 +499,7 @@ export default function App() {
                                 />
                             </div>
                             <button
-                                onClick={() => {
+                                onClick={async () => {
                                     if (!studentName || !studentClass) return alert("Vui lòng nhập đầy đủ thông tin!");
 
                                     // Kiểm tra nếu không phải thi tự do thì phải đúng lớp
@@ -465,11 +512,58 @@ export default function App() {
                                         setTimeLeft(examSettings.timeLimit * 60);
                                     }
 
-                                    setView('exam');
+                                    if (examSettings.requiresApproval) {
+                                        // Đăng ký vào danh sách chờ
+                                        setLoading(true);
+                                        const docRef = await addDoc(collection(db, "waiting_room"), {
+                                            roomCode,
+                                            studentName,
+                                            studentClass,
+                                            status: 'pending', // pending, approved, rejected
+                                            createdAt: serverTimestamp()
+                                        });
+                                        setPendingStudentId(docRef.id);
+
+                                        // Lắng nghe trạng thái duyệt
+                                        onSnapshot(doc(db, "waiting_room", docRef.id), (docSnapshot) => {
+                                            const data = docSnapshot.data();
+                                            if (data?.status === 'approved') {
+                                                setView('exam');
+                                                setLoading(false);
+                                            } else if (data?.status === 'rejected') {
+                                                alert("Yêu cầu tham gia của bạn bị từ chối.");
+                                                setView('home');
+                                                setLoading(false);
+                                            }
+                                        });
+                                        setView('waiting');
+                                    } else {
+                                        setView('exam');
+                                    }
                                 }}
                                 className="btn-primary w-full py-5 text-xl"
                             >
-                                Vào Làm Bài
+                                {loading ? 'Đang gửi yêu cầu...' : 'Vào Làm Bài'}
+                            </button>
+                        </div>
+                    </div>
+                )}
+                {/* VIEW: WAITING (Student waiting for approval) */}
+                {view === 'waiting' && (
+                    <div className="max-w-md mx-auto animate-in slide-in-from-bottom-8 duration-500">
+                        <div className="glass-card p-10 rounded-[2.5rem] space-y-8 text-center shadow-indigo-500/10 shadow-2xl border-indigo-500/20">
+                            <div className="w-20 h-20 bg-yellow-500/10 rounded-3xl flex items-center justify-center mx-auto">
+                                <Users className="text-yellow-400" size={40} />
+                            </div>
+                            <div className="space-y-2">
+                                <h2 className="text-3xl font-black">Đang chờ duyệt</h2>
+                                <p className="text-slate-400">Yêu cầu tham gia phòng thi của bạn đã được gửi. Vui lòng chờ giáo viên duyệt.</p>
+                            </div>
+                            <button
+                                onClick={() => setView('home')}
+                                className="btn-primary w-full py-5 text-xl bg-gradient-to-r from-gray-600 to-gray-700"
+                            >
+                                Hủy và về trang chủ
                             </button>
                         </div>
                     </div>
@@ -608,6 +702,53 @@ export default function App() {
                                 </table>
                             </div>
                         </div>
+
+                        {/* DANH SÁCH CHỜ DUYỆT */}
+                        {selectedRoomStats.requiresApproval && (
+                            <div className="grid gap-4 mt-8">
+                                <div className="flex justify-between items-end px-4">
+                                    <p className="font-bold text-lg text-yellow-500">⏳ Đang chờ duyệt ({waitingStudents.length})</p>
+                                </div>
+                                <div className="glass-card rounded-[2rem] overflow-hidden border-yellow-500/20">
+                                    <table className="w-full text-left">
+                                        <thead className="bg-yellow-500/5 text-yellow-500/50 uppercase text-[10px] font-black tracking-widest">
+                                            <tr>
+                                                <th className="px-8 py-4">Họ và Tên</th>
+                                                <th className="px-8 py-4">Lớp</th>
+                                                <th className="px-8 py-4">Hành động</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-white/5">
+                                            {waitingStudents.map((s) => (
+                                                <tr key={s.id} className="hover:bg-white/5 transition-colors">
+                                                    <td className="px-8 py-4 font-bold">{s.studentName}</td>
+                                                    <td className="px-8 py-4">{s.studentClass}</td>
+                                                    <td className="px-8 py-4 flex gap-2">
+                                                        <button
+                                                            onClick={() => handleApproval(s.id, 'approved')}
+                                                            className="px-4 py-1.5 bg-green-500 text-white rounded-lg text-xs font-bold hover:bg-green-600 transition-all"
+                                                        >
+                                                            Duyệt
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleApproval(s.id, 'rejected')}
+                                                            className="px-4 py-1.5 bg-red-500/20 text-red-500 rounded-lg text-xs font-bold hover:bg-red-500 hover:text-white transition-all"
+                                                        >
+                                                            Từ chối
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                            {waitingStudents.length === 0 && (
+                                                <tr>
+                                                    <td colSpan={3} className="px-8 py-10 text-center text-slate-500 italic">Không có yêu cầu nào đang chờ.</td>
+                                                </tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
             </main>
