@@ -7,7 +7,7 @@ import { parseExamWord, Question } from './utils/WordParser';
 import confetti from 'canvas-confetti';
 
 export default function App() {
-    const [view, setView] = useState<'home' | 'teacher' | 'student' | 'student-form' | 'exam'>('home');
+    const [view, setView] = useState<'home' | 'teacher' | 'student' | 'student-form' | 'exam' | 'stats'>('home');
     const [user, setUser] = useState<any>(null);
     const [examData, setExamData] = useState<Question[]>([]);
     const [roomCode, setRoomCode] = useState('');
@@ -25,6 +25,9 @@ export default function App() {
     const [examSettings, setExamSettings] = useState<any>(null);
     const [timeLeft, setTimeLeft] = useState(0);
     const [userAnswers, setUserAnswers] = useState<Record<number, string>>({});
+    const [teacherRooms, setTeacherRooms] = useState<any[]>([]);
+    const [selectedRoomStats, setSelectedRoomStats] = useState<any>(null);
+    const [studentResults, setStudentResults] = useState<any[]>([]);
 
     // Xử lý đếm ngược thời gian thi
     React.useEffect(() => {
@@ -52,6 +55,7 @@ export default function App() {
         try {
             const res = await signInWithPopup(auth, googleProvider);
             setUser(res.user);
+            fetchTeacherRooms(res.user.uid);
             setView('teacher');
         } catch (err) {
             console.error(err);
@@ -87,6 +91,7 @@ export default function App() {
 
             setRoomCode(code);
             setCurrentExamTitle(file.name);
+            fetchTeacherRooms(user.uid);
             alert(`Đã tạo phòng thi thành công! Mã: ${code}`);
         } catch (err) {
             console.error(err);
@@ -121,6 +126,70 @@ export default function App() {
             ...prev,
             [questionIndex]: value
         }));
+    };
+
+    const calculateScore = () => {
+        let correctCount = 0;
+        examData.forEach((q, i) => {
+            const userAnswer = userAnswers[i];
+            if (q.type === 'SHORT') {
+                if (userAnswer?.trim().toLowerCase() === q.explanation?.trim().toLowerCase()) {
+                    correctCount++;
+                }
+            } else {
+                if (userAnswer === q.options[q.correctAnswer]) {
+                    correctCount++;
+                }
+            }
+        });
+        return correctCount;
+    };
+
+    const handleSubmitExam = async () => {
+        const correctCount = calculateScore();
+        setLoading(true);
+        try {
+            await addDoc(collection(db, "results"), {
+                studentName,
+                studentClass,
+                roomCode,
+                examTitle: currentExamTitle,
+                score: correctCount,
+                total: examData.length,
+                submittedAt: serverTimestamp()
+            });
+            confetti({
+                particleCount: 150,
+                spread: 70,
+                origin: { y: 0.6 }
+            });
+            alert(`Bạn đã nộp bài thành công! Kết quả: ${correctCount}/${examData.length}`);
+            setView('home');
+        } catch (err) {
+            console.error(err);
+            alert("Lỗi khi nộp bài.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const fetchTeacherRooms = (uid: string) => {
+        const q = query(collection(db, "rooms"), where("teacherId", "==", uid));
+        onSnapshot(q, (snapshot) => {
+            const rooms = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setTeacherRooms(rooms);
+        });
+    };
+
+    const handleViewStats = (room: any) => {
+        setSelectedRoomStats(room);
+        const q = query(collection(db, "results"), where("roomCode", "==", room.code));
+        onSnapshot(q, (snapshot) => {
+            const results = snapshot.docs.map(doc => doc.data());
+            setStudentResults(results);
+            setView('exam'); // Using 'exam' view as a generic container or we might need a new view.
+            // Actually, let's just use a new view state 'stats'
+        });
     };
 
     return (
@@ -276,16 +345,48 @@ export default function App() {
 
                                         {roomCode && (
                                             <div className="w-full max-w-md bg-indigo-500/10 border border-indigo-500/30 p-6 rounded-3xl space-y-2 animate-in zoom-in">
-                                                <p className="text-indigo-300 font-medium italic">Phòng thi đang mở:</p>
+                                                <p className="text-indigo-300 font-medium italic">Phòng thi vừa tạo:</p>
                                                 <div className="text-5xl font-black tracking-widest text-white drop-shadow-md">
                                                     {roomCode}
                                                 </div>
-                                                <p className="text-sm text-slate-400 pt-2">Hãy gửi mã này cho học sinh để bắt đầu thi.</p>
-                                                <div className="text-sm font-bold text-indigo-400 uppercase tracking-tighter pt-2 truncate leading-relaxed">
-                                                    {currentExamTitle}
-                                                </div>
                                             </div>
                                         )}
+
+                                        {/* Danh sách phòng đã tạo */}
+                                        <div className="w-full max-w-4xl pt-10 border-t border-white/5 space-y-6">
+                                            <div className="flex justify-between items-center">
+                                                <h3 className="text-2xl font-bold">Danh sách phòng thi</h3>
+                                                <span className="bg-indigo-600 px-3 py-1 rounded-full text-xs font-bold">{teacherRooms.length} Phòng</span>
+                                            </div>
+                                            <div className="grid gap-4">
+                                                {teacherRooms.map((room) => (
+                                                    <div key={room.id} className="glass-card p-6 rounded-2xl flex justify-between items-center group">
+                                                        <div className="text-left space-y-1">
+                                                            <p className="font-bold text-lg">{room.title}</p>
+                                                            <div className="flex gap-4 text-xs text-slate-400">
+                                                                <span>Mã: <b className="text-indigo-400">{room.code}</b></span>
+                                                                <span>Lớp: {room.targetClass || "Tự do"}</span>
+                                                                <span>{room.questions.length} Câu</span>
+                                                            </div>
+                                                        </div>
+                                                        <button
+                                                            onClick={() => {
+                                                                setSelectedRoomStats(room);
+                                                                const q = query(collection(db, "results"), where("roomCode", "==", room.code));
+                                                                onSnapshot(q, (snapshot) => {
+                                                                    setStudentResults(snapshot.docs.map(doc => doc.data()));
+                                                                    setView('stats');
+                                                                });
+                                                            }}
+                                                            className="bg-white/10 hover:bg-white text-white hover:text-indigo-900 px-4 py-2 rounded-xl text-sm font-bold transition-all"
+                                                        >
+                                                            Xem k.quả
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                                {teacherRooms.length === 0 && <p className="text-slate-500 italic">Bạn chưa tạo phòng thi nào.</p>}
+                                            </div>
+                                        </div>
                                     </div>
                                 </>
                             )}
@@ -423,14 +524,14 @@ export default function App() {
                                                         key={idx}
                                                         onClick={() => handleAnswerChange(i, opt)}
                                                         className={`text-left p-5 rounded-2xl border transition-all font-medium group flex justify-between items-center ${isSelected
-                                                                ? 'bg-indigo-600/20 border-indigo-500 shadow-[0_0_20px_rgba(99,102,241,0.2)]'
-                                                                : 'bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/20'
+                                                            ? 'bg-indigo-600/20 border-indigo-500 shadow-[0_0_20px_rgba(99,102,241,0.2)]'
+                                                            : 'bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/20'
                                                             }`}
                                                     >
                                                         <span>{opt}</span>
                                                         <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${isSelected
-                                                                ? 'border-indigo-400 bg-indigo-500'
-                                                                : 'border-white/10 group-hover:border-white/30'
+                                                            ? 'border-indigo-400 bg-indigo-500'
+                                                            : 'border-white/10 group-hover:border-white/30'
                                                             }`}>
                                                             {isSelected && <div className="w-2 h-2 bg-white rounded-full"></div>}
                                                         </div>
@@ -445,19 +546,67 @@ export default function App() {
 
                         <div className="pt-10">
                             <button
-                                onClick={() => {
-                                    confetti({
-                                        particleCount: 150,
-                                        spread: 70,
-                                        origin: { y: 0.6 }
-                                    });
-                                    alert("Chúc mừng bạn đã hoàn thành bài thi!");
-                                    setView('home');
-                                }}
+                                onClick={handleSubmitExam}
+                                disabled={loading}
                                 className="btn-primary w-full py-6 text-2xl font-black shadow-indigo-500/20 shadow-xl"
                             >
-                                <CheckCircle2 size={28} /> Nộp Bài & Kết Thúc
+                                <CheckCircle2 size={28} /> {loading ? "Đang nộp..." : "Nộp Bài & Kết Thúc"}
                             </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* VIEW: ROOM STATS (Teacher Management) */}
+                {view === 'stats' && selectedRoomStats && (
+                    <div className="space-y-8 animate-in slide-in-from-bottom-8 duration-500">
+                        <div className="flex justify-between items-center bg-white/5 p-8 rounded-[2.5rem] border border-white/10 shadow-2xl">
+                            <div className="text-left">
+                                <h2 className="text-3xl font-black text-indigo-400 mb-1">{selectedRoomStats.title}</h2>
+                                <p className="text-slate-400">Thống kê kết quả thi - Mã phòng: <b className="text-white">{selectedRoomStats.code}</b></p>
+                            </div>
+                            <button onClick={() => setView('teacher')} className="px-6 py-2 bg-white/10 rounded-full text-sm font-bold hover:bg-white/20 transition-all">
+                                Quay lại
+                            </button>
+                        </div>
+
+                        <div className="grid gap-4">
+                            <div className="flex justify-between items-end px-4">
+                                <p className="font-bold text-lg">{studentResults.length} Học sinh đã nộp bài</p>
+                                <button className="text-indigo-400 text-sm font-bold hover:underline">Xuất Excel (Sắp tới)</button>
+                            </div>
+                            <div className="glass-card rounded-[2rem] overflow-hidden">
+                                <table className="w-full text-left">
+                                    <thead className="bg-white/5 text-slate-400 uppercase text-[10px] font-black tracking-widest">
+                                        <tr>
+                                            <th className="px-8 py-4">Họ và Tên</th>
+                                            <th className="px-8 py-4">Lớp</th>
+                                            <th className="px-8 py-4">Kết Quả</th>
+                                            <th className="px-8 py-4">Thời Gian</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-white/5">
+                                        {studentResults.map((res, i) => (
+                                            <tr key={i} className="hover:bg-white/5 transition-colors">
+                                                <td className="px-8 py-4 font-bold">{res.studentName}</td>
+                                                <td className="px-8 py-4">{res.studentClass}</td>
+                                                <td className="px-8 py-4">
+                                                    <span className={`px-3 py-1 rounded-full text-xs font-black ${(res.score / res.total) >= 0.5 ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'}`}>
+                                                        {res.score} / {res.total}
+                                                    </span>
+                                                </td>
+                                                <td className="px-8 py-4 text-slate-400 text-xs">
+                                                    {res.submittedAt?.toDate().toLocaleString('vi-VN')}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {studentResults.length === 0 && (
+                                            <tr>
+                                                <td colSpan={4} className="px-8 py-10 text-center text-slate-500 italic">Chưa có học sinh nào nộp bài.</td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 )}
