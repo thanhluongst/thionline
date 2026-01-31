@@ -263,19 +263,31 @@ export default function App() {
                                         <span className="w-10 h-10 bg-indigo-600 text-white rounded-xl flex items-center justify-center font-black flex-shrink-0">
                                             {i + 1}
                                         </span>
-                                        <p className="text-xl font-medium leading-relaxed pt-1">{q.text.replace(/^Câu\s\d+[:.]/i, '')}</p>
+                                        <div className="space-y-1">
+                                            <p className="text-xl font-bold leading-relaxed">{q.text.replace(/^Câu\s\d+[:.]?/i, '')}</p>
+                                            {q.type === 'TF' && <span className="text-[10px] bg-pink-500/20 text-pink-400 px-2 py-0.5 rounded-full font-bold uppercase tracking-widest">Đúng / Sai</span>}
+                                            {q.type === 'SHORT' && <span className="text-[10px] bg-yellow-500/20 text-yellow-500 px-2 py-0.5 rounded-full font-bold uppercase tracking-widest">Trả lời ngắn</span>}
+                                        </div>
                                     </div>
 
                                     <div className="grid gap-3 pl-14">
-                                        {q.options.map((opt, idx) => (
-                                            <button
-                                                key={idx}
-                                                className="text-left p-5 bg-white/5 rounded-2xl border border-white/5 hover:bg-white/10 hover:border-indigo-500/50 transition-all font-medium group flex justify-between items-center"
-                                            >
-                                                <span>{opt}</span>
-                                                <div className="w-5 h-5 rounded-full border-2 border-white/10 group-hover:border-indigo-500 transition-colors"></div>
-                                            </button>
-                                        ))}
+                                        {q.type === 'SHORT' ? (
+                                            <input
+                                                type="text"
+                                                placeholder="Nhập câu trả lời của bạn..."
+                                                className="w-full bg-white/5 border border-white/10 p-5 rounded-2xl focus:border-indigo-500 outline-none transition-all"
+                                            />
+                                        ) : (
+                                            q.options.map((opt, idx) => (
+                                                <button
+                                                    key={idx}
+                                                    className="text-left p-5 bg-white/5 rounded-2xl border border-white/5 hover:bg-white/10 hover:border-indigo-500/50 transition-all font-medium group flex justify-between items-center"
+                                                >
+                                                    <span>{opt}</span>
+                                                    <div className={`w-5 h-5 rounded-full border-2 border-white/10 group-hover:border-${q.type === 'TF' ? 'pink' : 'indigo'}-500 transition-colors`}></div>
+                                                </button>
+                                            ))
+                                        )}
                                     </div>
                                 </div>
                             ))}
